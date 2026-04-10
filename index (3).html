@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>IFrame bảng điều khiển tưới cây</title>
+  <style>
+    :root{
+      --bg:#0f172a; --card:#111827ee; --text:#e5e7eb;
+      --muted:#94a3b8; --accent:#22c55e; --warn:#f59e0b;
+      --danger:#ef4444; --ok:#60a5fa; --ring:#1f2937;
+      --humid:#22c55e; --bar-bg:#1e293b; --bar-fill:#60a5fa;
+    }
+    [data-theme="light"]{
+      --bg:#f6f7fb; --card:#ffffff; --text:#0f172a; --muted:#475569;
+      --accent:#16a34a; --ring:#e2e8f0; --bar-bg:#e2e8f0; --bar-fill:#2563eb
+    }
+    *{box-sizing:border-box}
+
+    html, body { margin:0; padding:0; width:100%; min-height:100%; overflow-x:hidden; }
+    body { background: transparent; font-family:system-ui, Segoe UI, Roboto; color:var(--text); }
+
+    .shell{
+      max-width:1180px; margin:0 auto;
+      padding-top:max(12px, env(safe-area-inset-top));
+      padding-bottom:max(12px, env(safe-area-inset-bottom));
+      padding-left:max(12px, env(safe-area-inset-left));
+      padding-right:max(12px, env(safe-area-inset-right));
+    }
+    .panel{
+      background:#0b1220; border:1px solid var(--ring);
+      border-radius:16px; padding:16px;
+      box-shadow:0 8px 24px rgba(0,0,0,.25);
+    }
+
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:4px 4px 0}
+    .title{font-weight:700}
+    .sub{font-size:12px;color:var(--muted)}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid var(--ring);font-size:12px;color:var(--muted)}
+    .status-dot{width:8px;height:8px;border-radius:999px;background:var(--accent)}
+    button{appearance:none;border:none;cursor:pointer;padding:10px 14px;border-radius:10px;font-weight:600}
+    .btn{background:var(--ok);color:#0b1220}
+    .btn.secondary{background:transparent;color:var(--text);border:1px solid var(--ring)}
+    .btn.danger{background:var(--danger);color:#fff}
+
+    /* Lưới: desktop 4 cột, mobile/app 2 cột */
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(4,1fr)}
+    @media (max-width: 900px){ .grid{ grid-template-columns: repeat(2, 1fr); } }
+
+    .card{background:var(--card);border:1px solid var(--ring);border-radius:14px;padding:14px;position:relative;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+    .label{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:8px}
+    .label .icon{font-size:20px}
+    .value{font-size:22px;font-weight:700;margin-top:8px;display:flex;align-items:baseline}
+    .unit{font-size:14px;color:var(--muted);margin-left:6px}
+    .trend{position:absolute;right:10px;top:10px;font-size:12px;color:var(--muted)}
+    .small{font-size:12px;color:var(--muted)}
+    .flex{display:flex;align-items:center;gap:14px}
+
+    /* Ring 0–100% */
+    .ring-wrap{width:110px;height:110px;margin-top:6px;position:relative}
+    .ring{width:110px;height:110px;display:block}
+    .ring-bg{fill:none;stroke:var(--ring);stroke-width:10}
+    .ring-fg{fill:none;stroke:var(--humid);stroke-width:10;stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%;stroke-dasharray:339.292;stroke-dashoffset:339.292;transition:stroke-dashoffset .5s ease}
+    .ring-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:800}
+    .ring-center .ring-val{font-size:22px}
+    .ring-center .ring-unit{font-size:12px;color:var(--muted);margin-left:4px}
+
+    /* Progress bar */
+    .bar-wrap{width:100%;height:14px;background:var(--bar-bg);border-radius:6px;overflow:hidden;margin-top:6px}
+    .bar-fill{height:100%;background:var(--bar-fill);width:0%;transition:width .5s ease}
+
+    /* Ẩn số hiển thị bên ngoài vòng tròn cho Độ ẩm trong đất & không khí (giữ trung tâm) */
+    [data-key="soilMoisture"] .flex > .value { display: none !important; }
+    [data-key="airHumidity"] .flex > .value { display: none !important; }
+
+    /* Ẩn nút Nháy tưới 10s nhưng không xóa DOM */
+    #pulseIrrigation { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="panel">
+      <header>
+        <div>
+          <div class="title">GIÁM SÁT VÀ PHÂN TÍCH CHỈ SỐ TRONG ĐẤT</div>
+          <div class="sub" id="subtitle">Nguồn dữ liệu: demo cục bộ</div>
+        </div>
+        <div class="controls">
+          <span class="pill"><span class="status-dot" id="connDot"></span><span id="connText">Đang chạy</span></span>
+          <span class="pill" id="modeText">Chế độ: AUTO</span>
+          <button id="refreshBtn" class="btn secondary">↻ Làm mới</button>
+        </div>
+      </header>
+
+      <section class="grid">
+        <div class="card" data-key="soilTemp">
+          <div class="label"><span class="icon">🌡️</span> Nhiệt độ trong đất</div>
+          <div class="value"><span class="val">--</span><span class="unit">°C</span></div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" data-key="soilMoisture">
+          <div class="label"><span class="icon">💧</span> Độ ẩm trong đất</div>
+          <div class="flex">
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 120 120">
+                <circle class="ring-bg" cx="60" cy="60" r="54"></circle>
+                <circle class="ring-fg" cx="60" cy="60" r="54"></circle>
+              </svg>
+              <div class="ring-center"><span class="ring-val">--</span><span class="ring-unit">%</span></div>
+            </div>
+            <div class="value" style="margin:0"><span class="val">--</span><span class="unit">%</span></div>
+          </div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" data-key="soilPH">
+          <div class="label"><span class="icon">⚗️</span> Độ pH</div>
+          <div class="value"><span class="val">--</span><span class="unit">pH</span></div>
+          <div class="bar-wrap"><div class="bar-fill"></div></div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" data-key="soilEC">
+          <div class="label"><span class="icon">🔌</span> Độ dẫn điện EC</div>
+          <div class="value"><span class="val">--</span><span class="unit">uS/cm</span></div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" data-key="phosphorus">
+          <div class="label"><span class="icon">🟣</span> Photpho (P)</div>
+          <div class="value"><span class="val">--</span><span class="unit">mg/kg</span></div>
+          <div class="bar-wrap"><div class="bar-fill"></div></div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" data-key="nitrogen">
+          <div class="label"><span class="icon">🟢</span> Nito (N)</div>
+          <div class="value"><span class="val">--</span><span class="unit">mg/kg</span></div>
+          <div class="bar-wrap"><div class="bar-fill"></div></div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" data-key="potassium">
+          <div class="label"><span class="icon">🟡</span> Kali (K)</div>
+          <div class="value"><span class="val">--</span><span class="unit">mg/kg</span></div>
+          <div class="bar-wrap"><div class="bar-fill"></div></div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" data-key="airTemp">
+          <div class="label"><span class="icon">🌤️</span> Nhiệt độ không khí</div>
+          <div class="value"><span class="val">--</span><span class="unit">°C</span></div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" data-key="airHumidity">
+          <div class="label"><span class="icon">☁️</span> Độ ẩm không khí</div>
+          <div class="flex">
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 120 120">
+                <circle class="ring-bg" cx="60" cy="60" r="54"></circle>
+                <circle class="ring-fg" cx="60" cy="60" r="54"></circle>
+              </svg>
+              <div class="ring-center"><span class="ring-val">--</span><span class="ring-unit">%</span></div>
+            </div>
+            <div class="value" style="margin:0"><span class="val">--</span><span class="unit">%</span></div>
+          </div>
+          <div class="trend" data-trend></div>
+        </div>
+
+        <div class="card" id="irrigationCard">
+          <div class="label"><span class="icon">🚿</span> Điều khiển tưới cây</div>
+          <div class="value" id="irrigationState">Trạng thái: <strong>TẮT</strong></div>
+          <div class="controls" style="margin-top:8px">
+            <button class="btn" id="toggleIrrigation">Bật tưới</button>
+            <button class="btn secondary" id="pulseIrrigation">Nháy tưới 10s</button> <!-- bị ẩn bởi CSS -->
+            <button class="btn danger" id="stopIrrigation">Tắt tưới</button>
+          </div>
+          <div class="small" id="lastAction">—</div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Era SDK -->
+  <script src="https://www.unpkg.com/@eohjsc/era-widget@1.1.6/src/index.js"></script>
+  <script>
+    /** ---------------- UI helpers ---------------- **/
+    const fields=['soilTemp','soilMoisture','soilPH','soilEC','phosphorus','nitrogen','potassium','airTemp','airHumidity'];
+    const units={soilTemp:'°C',soilMoisture:'%',soilPH:'pH',soilEC:'uS/cm',phosphorus:'mg/kg',nitrogen:'mg/kg',potassium:'mg/kg',airTemp:'°C',airHumidity:'%'};
+    const CIRCUM=339.292; let last={};
+
+    const clamp01=x=>Math.max(0,Math.min(1,x));
+    function updateRing(card,percent){
+      const fg=card.querySelector('.ring-fg'); const txt=card.querySelector('.ring-val');
+      if(!fg||!txt) return;
+      const p=isFinite(percent)?Math.round(percent):0;
+      const t=clamp01(p/100);
+      fg.style.strokeDashoffset=String(CIRCUM*(1-t));
+      txt.textContent=isFinite(percent)?p:'--';
+    }
+    function updateBar(card,val,max){
+      const bar=card.querySelector('.bar-fill'); if(!bar) return;
+      const percent=clamp01((+val||0)/max)*100; bar.style.width=percent+'%';
+    }
+    function updateCard(k,v){
+      const c=document.querySelector(`[data-key="${k}"]`); if(!c) return;
+      const ve=c.querySelector('.val'); const te=c.querySelector('[data-trend]'); const prev=last[k];
+      if(ve) ve.textContent=(v??'--');
+      const u=c.querySelector('.unit'); if(u && units[k]) u.textContent=units[k];
+
+      if(typeof prev==='number'&&typeof v==='number'){
+        const d=Math.round((v-prev)*100)/100;
+        te.textContent=d===0?'—':(d>0?`↑ +${d}`:`↓ ${d}`);
+        te.style.color=d>0?'var(--ok)':'var(--warn)';
+      }
+      last[k]=typeof v==='number'?v:prev;
+
+      if(k==='soilMoisture'||k==='airHumidity') updateRing(c,Number(v));
+      if(['phosphorus','nitrogen','potassium'].includes(k)) updateBar(c,Number(v),200);
+      if(k==='soilPH') updateBar(c,Number(v),14);
+    }
+    function applyPayload(p){
+      fields.forEach(k=>{ if(p&&p[k]!==undefined) updateCard(k,p[k]); });
+      if(p&&typeof p.irrigationOn==='boolean') setIrrigationState(p.irrigationOn);
+    }
+
+    /** ---------------- Irrigation buttons ---------------- **/
+    const irrigationStateEl=document.getElementById('irrigationState');
+    const lastActionEl=document.getElementById('lastAction');
+    const btnToggle=document.getElementById('toggleIrrigation');
+    const btnStop =document.getElementById('stopIrrigation');
+    // giữ pulseIrrigation trong DOM nhưng KHÔNG gắn listener
+    let irrigationOn=false;
+
+    function setIrrigationState(on){
+      irrigationOn=!!on;
+      irrigationStateEl.innerHTML=`Trạng thái: <strong>${on?'BẬT':'TẮT'}</strong>`;
+      btnToggle.textContent=on?'Tắt tưới':'Bật tưới';
+    }
+
+    /** ---------------- EraWidget init (fallback an toàn) ---------------- **/
+    const widgetInstance = (function(){
+      if (window.eraWidget && typeof window.eraWidget.init==='function') return window.eraWidget;
+      if (window.EraWidget) return new window.EraWidget();
+      console.warn('EraWidget chưa sẵn sàng, dùng stub để tránh lỗi.');
+      return {
+        init(){}, ready(){}, requestAdjustMobileHeight(){}, triggerAction(){ console.warn('triggerAction khi SDK chưa sẵn sàng'); }
+      };
+    })();
+
+    let actions = []; // sẽ nhận từ configuration
+    let hasSDKReady = false;
+
+    const pick=(cfg,values)=>{
+      if(!cfg||!cfg.id) return undefined;
+      const slot=values[cfg.id]; if(!slot) return undefined;
+      let v=slot.value; if(typeof v==='string'&&v.trim()!==''&&!isNaN(Number(v))) v=Number(v);
+      return v;
+    };
+
+    const connDot  = document.getElementById('connDot');
+    const connText = document.getElementById('connText');
+    function setConn(ok,msg){
+      if(connDot) connDot.style.background = ok ? 'var(--accent)' : 'var(--danger)';
+      if(connText) connText.textContent = msg || (ok ? 'Đang chạy' : 'Mất kết nối');
+    }
+
+    widgetInstance.init({
+      ready:false,
+      needRealtimeConfigs:true,
+      needHistoryConfigs:true,
+      needActions:true,
+      maxRealtimeConfigsCount:12,
+      maxHistoryConfigsCount:12,
+      maxActionsCount:2, /* chỉ cần Bật/Tắt */
+      mobileHeight: 300,
+
+      onConfiguration:(configuration)=>{
+        const rc=configuration.realtime_configs||[];
+        const configsoilTemp     = rc[0],
+              configsoilMoisture = rc[1],
+              configsoilPH       = rc[2],
+              configsoilEC       = rc[3],
+              configphosphorus   = rc[4],
+              confignitrogen     = rc[5],
+              configpotassium    = rc[6],
+              configairTemp      = rc[7],
+              configairHumidity  = rc[8];
+
+        window.__cfg = {
+          configsoilTemp, configsoilMoisture, configsoilPH, configsoilEC,
+          configphosphorus, confignitrogen, configpotassium, configairTemp, configairHumidity
+        };
+
+        actions = configuration.actions||[]; // kỳ vọng: [Bật, Tắt]
+        if(configuration.url){
+          document.getElementById('subtitle').textContent=`Nguồn dữ liệu: ${configuration.url}`;
+        }
+        requestAnimationFrame(requestHeight);
+        setConn(true,'Đang chạy');
+      },
+      onValues:(values={})=>{
+        const C = window.__cfg || {};
+        const payload={
+          soilTemp:pick(C.configsoilTemp,values),
+          soilMoisture:pick(C.configsoilMoisture,values),
+          soilPH:pick(C.configsoilPH,values),
+          soilEC:pick(C.configsoilEC,values),
+          phosphorus:pick(C.configphosphorus,values),
+          nitrogen:pick(C.confignitrogen,values),
+          potassium:pick(C.configpotassium,values),
+          airTemp:pick(C.configairTemp,values),
+          airHumidity:pick(C.configairHumidity,values)
+        };
+        applyPayload(payload);
+        requestAnimationFrame(requestHeight);
+      },
+      onError:(e)=>{
+        console.error('EraWidget error:', e);
+        setConn(false,'Lỗi dữ liệu');
+      }
+    });
+
+    widgetInstance.ready?.();
+    hasSDKReady = true;
+
+    /** ---------------- Map 2 hành động: Bật/Tắt ---------------- **/
+    // actions[0] = Bật tưới
+    // actions[1] = Tắt tưới
+    btnToggle.addEventListener('click', ()=>{
+      if(!hasSDKReady){ lastActionEl.textContent='SDK chưa sẵn sàng'; return; }
+      const idx = irrigationOn ? 1 : 0; // đang bật -> tắt, đang tắt -> bật
+      const act = actions[idx]?.action;
+      if (act){
+        widgetInstance.triggerAction(act, null);
+        setIrrigationState(!irrigationOn);
+        lastActionEl.textContent = irrigationOn ? 'Đã bật tưới' : 'Đã tắt tưới';
+      } else {
+        lastActionEl.textContent='Chưa cấu hình action Bật/Tắt';
+      }
+    });
+
+    btnStop.addEventListener('click', ()=>{
+      if(!hasSDKReady){ lastActionEl.textContent='SDK chưa sẵn sàng'; return; }
+      const act = actions[1]?.action; // Tắt tưới
+      if (act){
+        widgetInstance.triggerAction(act, null);
+        setIrrigationState(false);
+        lastActionEl.textContent='Dừng tưới';
+      } else {
+        lastActionEl.textContent='Chưa cấu hình action Tắt';
+      }
+    });
+
+    /** ---------------- Refresh & auto-height ---------------- **/
+    document.getElementById('refreshBtn').addEventListener('click', ()=>{
+      requestAnimationFrame(requestHeight);
+      // Muốn reload toàn trang: bật dòng dưới
+      // location.reload();
+    });
+
+    function calcIframeHeight(){
+      const de=document.documentElement, b=document.body||{};
+      return Math.max(de.scrollHeight, de.offsetHeight, b.scrollHeight||0, b.offsetHeight||0);
+    }
+    let rafId=null;
+    function requestHeight(){
+      if(rafId) cancelAnimationFrame(rafId);
+      rafId=requestAnimationFrame(()=>{
+        const h=calcIframeHeight();
+        try{ widgetInstance.requestAdjustMobileHeight(h); }catch(e){}
+      });
+    }
+    ['load','resize','orientationchange'].forEach(ev=>
+      window.addEventListener(ev,()=>requestAnimationFrame(requestHeight),{passive:true})
+    );
+    const ro=new ResizeObserver(()=>requestAnimationFrame(requestHeight));
+    ro.observe(document.documentElement);
+    requestHeight();
+  </script>
+</body>
+</html>
